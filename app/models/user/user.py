@@ -1,8 +1,8 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import String, DateTime
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.enums import UserRoleEnum
@@ -29,11 +29,20 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False, comment="User status")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        index=True,
-        default=DateTimeManager.get_now_utc,
+        server_default=func.now()
     )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=DateTimeManager.get_now_utc,
-        onupdate=DateTimeManager.get_now_utc,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    wallet = relationship(
+        "Wallet",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        single_parent=True,
+        lazy="selectin",
+        uselist=False
     )

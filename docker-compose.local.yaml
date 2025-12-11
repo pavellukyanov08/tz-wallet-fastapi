@@ -4,45 +4,43 @@ services:
     build:
       context: .
     ports:
-      - "9998:80"
+      - "9999:80"
     depends_on:
       - db
     restart: always
-    networks:
-      - tz_wallet_network
     env_file:
-      - .env.docker
+      - .env
 
   db:
     container_name: tz_wallet_db
     image: postgres:latest
     ports:
-      - "5429:5432"
+      - "5428:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
       - tz_wallet_network
     env_file:
-      - .env.docker
+      - .env
 
 #  redis:
 #    image: redis:latest
 #    container_name: tz_wallet_redis
 #    ports:
-#      - "6376:6379"
+#      - "6377:6379"
 #    restart: always
 #    volumes:
-#      - tz_wallet-redis-data:/data
+#      - tz_auth-redis-data:/data
 #      - ./redis.conf:/usr/local/etc/redis/redis.conf
 #      - ./users.acl:/usr/local/etc/redis/users.acl
-#    environment:
+#    env_file:
 #      - .env
 #    networks:
-#      - tz_wallet_network
+#      - tz_auth_network
 #    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
 
 volumes:
-#  tz_wallet-redis-data:
+#  tz_auth-redis-data:
   postgres_data:
 
 networks:

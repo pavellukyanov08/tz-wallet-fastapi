@@ -50,11 +50,11 @@ async def refresh_token(
     return service.refresh_token(current_user=current_user)
 
 
-@router.post('/logout', response_model=MessageDTO)
-async def logout(
-    service: AuthServiceDep,
-    current_user: CurrentActiveUserDep
-) -> MessageDTO:
-    await service.logout(user_data=current_user)
-
-    return MessageDTO(message="Успешный выход из системы")
+# @router.post('/logout', response_model=MessageDTO)
+# async def logout(
+#     service: AuthServiceDep,
+#     current_user: CurrentActiveUserDep
+# ) -> MessageDTO:
+#     await service.logout(user_data=current_user)
+#
+#     return MessageDTO(message="Успешный выход из системы")

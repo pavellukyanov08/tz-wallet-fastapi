@@ -37,9 +37,6 @@ class AuthService:
             token_type=TokenTypeEnum.BEARER
         )
 
-    async def commit_user(self) -> None:
-        await self._postgres_adapter.commit_user()
-
     async def login(
         self,
         *,
@@ -54,11 +51,6 @@ class AuthService:
         )
         refresh_token = create_refresh_token(
             user_data=user_data
-        )
-        result = TokenPair(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type=TokenTypeEnum.BEARER
         )
         return TokenPair(
             access_token=access_token,

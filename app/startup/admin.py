@@ -3,6 +3,7 @@ from logging import Logger
 from app.common.adapters import PostgresStorageAdapter
 from app.common.schemas import UserDTO
 from app.core.auth import password_manager
+from app.schemas.wallet import WalletCreate
 from app.settings.startup import startup_settings
 from app.utils import DateTimeManager
 
@@ -27,6 +28,9 @@ class AdminStartup:
             sid=startup_settings.ADMIN_SID,
             fullname=startup_settings.ADMIN_FIRST_NAME,
             email=startup_settings.ADMIN_EMAIL,
+            wallet=WalletCreate(
+                sid=startup_settings.ADMIN_WALLET_SID,
+            ),
             hashed_password=hashed_password,
             created_at=created_at,
             updated_at=created_at,
@@ -49,7 +53,7 @@ class AdminStartup:
         await self._postgres_adapter.create_user(
             user_model=admin_model
         )
-        await self._postgres_adapter.commit_user()
+        await self._postgres_adapter.commit()
 
         self._logger.info(
             "Admin %s has been successfully created %s",

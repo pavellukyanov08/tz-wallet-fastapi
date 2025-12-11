@@ -2,13 +2,18 @@ import logging
 from typing import cast
 from uuid import UUID
 
+from fastapi import HTTPException
 from pydantic import EmailStr
 from sqlalchemy import ColumnElement, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.enums import OperationTypeEnum
 from app.models.user import User
+from app.models.wallet import Wallet, Operation
 from app.common.schemas import UserDTO
+from app.schemas.wallet import WalletRead, WalletUpdate
 from app.utils import DateTimeManager
 
 
@@ -23,16 +28,16 @@ class PostgresStorageAdapter:
         self._logger = logger
         self._postgres_session = postgres_session
 
-    async def commit_user(self) -> None:
+    async def commit(self) -> None:
         try:
             await self._postgres_session.commit()
             self._logger.info("Changes has been commited")
         except Exception as e:
             self._logger.error("Error while commiting changes: %s", e)
-            await self.rollback_user()
+            await self.rollback()
             raise
 
-    async def rollback_user(self) -> None:
+    async def rollback(self) -> None:
         try:
             await self._postgres_session.rollback()
             self._logger.info("Changes has been cancelled")
@@ -50,6 +55,7 @@ class PostgresStorageAdapter:
             email=cast(EmailStr, user_alchemy_model.email),
             fullname=user_alchemy_model.fullname,
             role=user_alchemy_model.role,
+            wallet=user_alchemy_model.wallet,
             hashed_password=user_alchemy_model.hashed_password,
             created_at=user_alchemy_model.created_at,
             updated_at=user_alchemy_model.created_at,
@@ -60,7 +66,11 @@ class PostgresStorageAdapter:
         *,
         user_result: ColumnElement[bool]
     ) -> UserDTO | None:
-        query = select(User).where(user_result)
+        query = (
+            select(User)
+            .options(selectinload(User.wallet))
+            .where(user_result)
+        )
         stmt = await self._postgres_session.execute(query)
         result = stmt.scalar_one_or_none()
 
@@ -95,28 +105,13 @@ class PostgresStorageAdapter:
             )
             raise
 
-    async def get_users(
-        self,
-    ) -> list[UserDTO]:
-        try:
-            stmt = select(User)
-            result = await self._postgres_session.execute(stmt)
-            users: list[User] = list(result.scalars())
-
-            self._logger.info("Received all users, count=%s", len(users))
-
-            return [UserDTO.model_validate(user, from_attributes=True) for user in users]
-        except Exception as e:
-            self._logger.info("Failed receiving users: error=%s", e)
-            raise
-
     async def get_user_by_email(
         self, *, user_email: EmailStr
     ) -> UserDTO | None:
         try:
             user_model = await self._get_user_model(
                 user_result=(
-                        User.email == user_email
+                    User.email == user_email
                 ),
             )
             self._logger.info(
@@ -130,6 +125,86 @@ class PostgresStorageAdapter:
                 user_email,
                 e,
             )
+            raise
+
+    async def get_wallet(
+        self,
+        *,
+        wallet_sid: UUID
+    ) -> WalletRead:
+        try:
+            stmt = select(Wallet).where(Wallet.sid == wallet_sid)
+            result = await self._postgres_session.execute(stmt)
+            wallet: Wallet = result.scalar_one_or_none()
+            self._logger.info(
+                "Received wallet wallet_sid=%s",
+                wallet_sid,
+            )
+            return WalletRead.model_validate(wallet, from_attributes=True)
+        except Exception as e:
+            self._logger.info(
+                "Failed receiving wallet: wallet_sid=%s error=%s",
+                wallet_sid,
+                e,
+            )
+            raise
+
+    async def update_wallet(
+        self,
+        *,
+        data: WalletUpdate,
+        wallet_sid: UUID,
+    ) -> None:
+        try:
+            query = None
+            if data.operation_type == OperationTypeEnum.WITHDRAW:
+                query = (
+                    update(Wallet)
+                    .where(
+                        Wallet.sid == wallet_sid,
+                        Wallet.total_amount >= data.amount
+                    )
+                    .values(
+                        total_amount=Wallet.total_amount - data.amount,
+                        updated_at=data.updated_at,
+                    )
+                )
+            elif data.operation_type == OperationTypeEnum.DEPOSIT:
+                query = (
+                    update(Wallet)
+                    .where(
+                        Wallet.sid == wallet_sid
+                    )
+                    .values(
+                        total_amount=Wallet.total_amount + data.amount,
+                        updated_at=data.updated_at,
+                    )
+                )
+
+            if query is None:
+                raise ValueError(f"Error while updating wallet")
+
+            result = await self._postgres_session.execute(query)
+
+            if data.operation_type == OperationTypeEnum.WITHDRAW and result.rowcount == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Not enough funds for withdraw",
+                )
+
+            operation = Operation(
+                operation_type=data.operation_type,
+                amount=data.amount,
+                wallet_sid=wallet_sid,
+                created_at=DateTimeManager.get_now_utc(),
+            )
+            self._postgres_session.add(operation)
+            self._logger.info("Wallet has been updated: %s",
+                            wallet_sid
+            )
+        except SQLAlchemyError as e:
+            self._logger.info("Error while updating wallet: %s", e)
+            await self.rollback()
             raise
 
     async def check_user_exists(
@@ -157,6 +232,15 @@ class PostgresStorageAdapter:
                     updated_at=user_model.created_at,
                 )
                 self._postgres_session.add(instance=user)
+                await self._postgres_session.flush()
+
+                wallet = Wallet(
+                    sid=user_model.wallet.sid,
+                    user_sid=user.sid,
+                    total_amount=user_model.wallet.total_amount,
+                    created_at=DateTimeManager.get_now_utc(),
+                )
+                self._postgres_session.add(wallet)
 
                 self._logger.info("User has been created: %s", user_model.sid)
         except Exception as e:
@@ -165,50 +249,7 @@ class PostgresStorageAdapter:
                 user_model.sid,
                 e,
             )
-            await self.rollback_user()
-            raise
-
-    async def update_user(
-        self,
-        *,
-        user_model: UserDTO,
-    ) -> None:
-        try:
-            query = update(User).where(User.sid == user_model.sid).values(
-                # email=str(user_model.email),
-                fullname=user_model.fullname,
-                hashed_password=user_model.hashed_password,
-            )
-            await self._postgres_session.execute(query)
-            self._logger.info("User has been updated: %s",
-                            user_model.sid
-            )
-        except SQLAlchemyError as e:
-            self._logger.info("Error while updating user: %s", e)
-            await self.rollback_user()
-            raise
-
-    async def update_user_password(
-        self,
-        *,
-        user_sid: UUID,
-        new_hashed_password: str,
-    ) -> None:
-        try:
-            query = update(User).where(User.sid == user_sid).values(
-                hashed_password=new_hashed_password,
-                updated_at=DateTimeManager.get_now_utc(),
-            )
-            await self._postgres_session.execute(query)
-            self._logger.info("Password has been updated for user: %s",
-                user_sid
-            )
-        except SQLAlchemyError as e:
-            self._logger.info("Error while updating password for user: %s error=%e",
-                user_sid,
-                e
-            )
-            await self.rollback_user()
+            await self.rollback()
             raise
 
     async def block_user(
@@ -235,7 +276,7 @@ class PostgresStorageAdapter:
                 user_sid,
                 e,
             )
-            await self.rollback_user()
+            await self.rollback()
             raise
 
     async def unlock_user(
@@ -262,5 +303,5 @@ class PostgresStorageAdapter:
                 user_sid,
                 e,
             )
-            await self.rollback_user()
+            await self.rollback()
             raise
