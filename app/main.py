@@ -20,7 +20,7 @@ redis_password = os.getenv("REDIS_PASSWORD", None)
 redis_client = Redis(host=redis_host, port=redis_port, password=redis_password)
 
 app = FastAPI(
-    title="Система аутентификации и авторизации",
+    title="Система управления кошельками пользователей",
     middleware=[
         Middleware(LoggerMiddleware)
     ]
