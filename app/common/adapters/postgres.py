@@ -231,14 +231,14 @@ class PostgresStorageAdapter:
                     created_at=user_model.created_at,
                     updated_at=user_model.created_at,
                 )
-                self._postgres_session.add(instance=user)
-                await self._postgres_session.flush()
+                self._postgres_session.add(user)
 
                 wallet = Wallet(
                     sid=user_model.wallet.sid,
                     user_sid=user.sid,
                     total_amount=user_model.wallet.total_amount,
                     created_at=DateTimeManager.get_now_utc(),
+                    updated_at=DateTimeManager.get_now_utc(),
                 )
                 self._postgres_session.add(wallet)
 
